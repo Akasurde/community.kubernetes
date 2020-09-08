@@ -115,17 +115,16 @@ connections:
     context: 'awx/192-168-64-4:8443/developer'
 """
 
-import re
 import json
 
 from ansible.errors import AnsibleError
+from ansible.plugins.inventory import BaseInventoryPlugin, Constructable, Cacheable
 from ansible_collections.community.kubernetes.plugins.module_utils.common import (
     K8sAnsibleMixin,
     HAS_K8S_MODULE_HELPER,
     k8s_import_exception,
-    get_api_client,
+    get_api_client
 )
-from ansible.plugins.inventory import BaseInventoryPlugin, Constructable, Cacheable
 
 try:
     from openshift.dynamic.exceptions import DynamicApiError
@@ -196,7 +195,7 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable, K8sAnsibleM
         for connection in connections:
             if not isinstance(connection, dict):
                 raise K8sInventoryException("Expecting connection to be a dictionary.")
-            client = self.get_api_client(**connection)
+            client = get_api_client(**connection)
             name = connection.get(
                 "name", self.get_default_host_name(client.configuration.host)
             )
@@ -213,7 +212,6 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable, K8sAnsibleM
                 self.inventory.add_group(namespace_group)
                 self.inventory.add_child(sanitized_name, namespace_group)
 
-                self.get_pods_for_namespace(client, name, namespace, namespace_group)
                 self.get_pods_from_parents(client, name, namespace, namespace_group)
 
     @staticmethod
@@ -280,27 +278,6 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable, K8sAnsibleM
                 for pod in pods.items:
                     self.add_pod_to_groups(pod, [instance_group])
 
-    def get_pods_for_namespace(self, client, name, namespace, namespace_group):
-        v1_pod = client.resources.get(api_version="v1", kind="Pod")
-        try:
-            obj = v1_pod.get(namespace=namespace)
-        except DynamicApiError as exc:
-            self.display.debug(exc)
-            raise K8sInventoryException(
-                "Error fetching Pod list: %s" % format_dynamic_api_exc(exc)
-            )
-
-        for pod in obj.items:
-            pod_groups = [namespace_group]
-            if pod.metadata.labels:
-                # create a group for each label_value
-                for key, value in pod.metadata.labels:
-                    group_name = self._sanitize_group_name('label_{0}_{1}'.format(key, value))
-                    if group_name not in pod_groups:
-                        pod_groups.append(group_name)
-                    self.inventory.add_group(group_name)
-            self.add_pod_to_groups(pod, pod_groups)
-
     def add_pod_to_groups(self, pod, pod_groups):
         # If the pod has no running containers or has permanently terminated we should skip
         if not pod.status.containerStatuses or pod.status.phase not in [
@@ -361,26 +338,13 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable, K8sAnsibleM
                     container_name, "container_state", "Running"
                 )
             if container.state.waiting:
-                self.inventory.set_variable(
-                    container_name, "container_state", "Waiting"
-                )
-            self.inventory.set_variable(
-                container_name, "container_ready", container.ready
-            )
-            self.inventory.set_variable(container_name, "ansible_remote_tmp", "/tmp/")
-            self.inventory.set_variable(
-                container_name, "ansible_connection", self.connection_plugin
-            )
-            self.inventory.set_variable(
-                container_name, "ansible_{0}_pod".format(self.transport), pod_name
-            )
-            self.inventory.set_variable(
-                container_name,
-                "ansible_{0}_container".format(self.transport),
-                container.name,
-            )
-            self.inventory.set_variable(
-                container_name,
-                "ansible_{0}_namespace".format(self.transport),
-                namespace,
-            )
+                self.inventory.set_variable(container_name, 'container_state', 'Waiting')
+            self.inventory.set_variable(container_name, 'container_ready', container.ready)
+            self.inventory.set_variable(container_name, 'ansible_remote_tmp', '/tmp/')
+            self.inventory.set_variable(container_name, 'ansible_connection', self.connection_plugin)
+            self.inventory.set_variable(container_name, 'ansible_{0}_pod'.format(self.transport),
+                                        pod_name)
+            self.inventory.set_variable(container_name, 'ansible_{0}_container'.format(self.transport),
+                                        container.name)
+            self.inventory.set_variable(container_name, 'ansible_{0}_namespace'.format(self.transport),
+                                        namespace)
